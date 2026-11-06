@@ -17,7 +17,7 @@
         <RootNamespace>Plugin.BetterFirebasePushNotification</RootNamespace>
 
         <PackageId>Plugin.BetterFirebasePushNotification</PackageId>
-        <PackageVersion>4.0.3</PackageVersion>
+        <PackageVersion>4.0.5</PackageVersion>
 
         <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
         <PackageLicenseFile>LICENSE</PackageLicenseFile>

@@ -14,10 +14,33 @@ namespace Plugin.BetterFirebasePushNotification;
 public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseCloudMessaging
 {
     private static Context _context;
+
+    /// <summary>
+    /// Zorgt dat de default FirebaseApp bestaat vóór er iets aan
+    /// FirebaseMessaging.Instance wordt aangeraakt. Compat met de oude plugin,
+    /// die Firebase zelf initialiseerde in plaats van CrossFirebase.Initialize
+    /// te verwachten.
+    /// </summary>
+    private static void EnsureFirebaseAppInitialized()
+    {
+        if(CrossFirebase.TryGetDefaultApp(out _)) {
+            return;
+        }
+        FirebaseApp.InitializeApp(_context);
+        if(CrossFirebase.TryGetDefaultApp(out _)) {
+            FirebaseInitializationHooks.InvokeAfterInitialize();
+        } else {
+            Console.WriteLine(
+                "[Plugin.BetterFirebasePushNotification] Warning: geen default FirebaseApp. "
+                    + "Controleer google-services.json (package_name moet matchen met de ApplicationId). "
+                    + "Zonder resources kan Firebase Messaging niet initialiseren."
+            );
+        }
+    }
     private static IList<NotificationUserCategory> userNotificationCategories = new List<NotificationUserCategory>();
 
     public static string IntentKeyFCMNotification { get; set; } = "intent_key_fcm_notification";
-    public static Type NotificationActivityType { get; set; }
+    public static Java.Lang.Class NotificationActivityType { get; set; }
     public static string ActionIdentifierKey = "action_identifier";
     public static string ChannelId { get; set; }
     public static int SmallIconRef { private get; set; } = Android.Resource.Drawable.SymDefAppIcon;
@@ -130,6 +153,7 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
         bool autoRegistration = true
     )
     {
+        EnsureFirebaseAppInitialized();
         RegisterUserNotificationCategories(notificationCategories);
         FirebaseMessaging.Instance.AutoInitEnabled = autoRegistration;
     }
@@ -164,7 +188,12 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
                                 
 
                                 if(action.Type == NotificationActionType.Foreground) {
-                                    actionIntent = new Intent(Application.Context, NotificationActivityType);
+                                    // Intent-constructor heeft een Java.Lang.Class nodig;
+                                    // fallback op de launcher-intent zolang OnNewIntent
+                                    // het activity-type nog niet heeft vastgelegd.
+                                    actionIntent = NotificationActivityType != null
+                                        ? new Intent(Application.Context, NotificationActivityType)
+                                        : _context.PackageManager.GetLaunchIntentForPackage(_context.PackageName);
 
                                     if(NotificationActivityFlags != null) {
                                         actionIntent.SetFlags(NotificationActivityFlags.Value);
@@ -194,7 +223,7 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
         
 
         var notificationManager = (NotificationManager) _context.GetSystemService(Context.NotificationService);
-        notificationManager.Notify(1337, builder.SetContentIntent(pendingIntent).Build());
+        notificationManager.Notify(LocalNotificationId, builder.SetContentIntent(pendingIntent).Build());
 
     }
 
@@ -215,9 +244,15 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
         return builder;
     }
 
+    /// <summary>
+    /// Id waarmee de lokale notificatie getoond wordt; nodig om hem na een
+    /// actieknop-tik handmatig te verwijderen (SetAutoCancel geldt daar niet voor).
+    /// </summary>
+    public const int LocalNotificationId = 1337;
+
     public static void OnNewIntent(Activity activity, Intent intent)
     {
-        NotificationActivityType = activity.GetType();
+        NotificationActivityType = activity.Class;
 
         if(intent == null) {
             return;
@@ -278,6 +313,11 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
         }
         intent.RemoveExtra(IntentKeyFCMNotification);
         intent.RemoveExtra(ActionIdentifierKey);
+
+        // SetAutoCancel verwijdert de notificatie alleen bij een tik op de
+        // notificatie zelf; na een actieknop-tik expliciet weghalen.
+        var notificationManager = (NotificationManager) _context.GetSystemService(Context.NotificationService);
+        notificationManager.Cancel(LocalNotificationId);
     }
 
     /// <summary>
@@ -327,6 +367,7 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
     {
         // Legacy gedrag: null zolang de FCM-token nog niet is uitgegeven
         // (de oude plugin gooide hier geen exception).
+        EnsureFirebaseAppInitialized();
         var token = (await FirebaseMessaging.Instance.GetToken()).ToString();
         return string.IsNullOrEmpty(token) ? null : token;
     }
@@ -339,6 +380,7 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
         get
         {
             try {
+                EnsureFirebaseAppInitialized();
                 var token = FirebaseMessaging.Instance.GetToken().Result?.ToString();
                 return string.IsNullOrEmpty(token) ? null : token;
             } catch(Exception) {
@@ -353,6 +395,7 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
     /// </summary>
     public void RegisterForPushNotifications()
     {
+        EnsureFirebaseAppInitialized();
         _ = ((FirebasePushNotificationManager) BetterFirebasePushNotification.Current).OnTokenRefreshAsync();
     }
 
@@ -374,11 +417,13 @@ public sealed class FirebasePushNotificationManager : DisposableBase, IFirebaseC
 
     public Task SubscribeToTopicAsync(string topic)
     {
+        EnsureFirebaseAppInitialized();
         return FirebaseMessaging.Instance.SubscribeToTopic(topic).AsAsync();
     }
 
     public Task UnsubscribeFromTopicAsync(string topic)
     {
+        EnsureFirebaseAppInitialized();
         return FirebaseMessaging.Instance.UnsubscribeFromTopic(topic).AsAsync();
     }
 
