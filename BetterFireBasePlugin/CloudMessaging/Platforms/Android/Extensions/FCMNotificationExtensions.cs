@@ -1,0 +1,85 @@
+using Android.Content;
+using Firebase.Messaging;
+
+namespace Plugin.BetterFirebasePushNotification;
+
+public static class FCMNotificationExtensions
+{
+    private const string BundleKeyTitle = "title";
+    private const string BundleKeyBody = "body";
+    private const string BundleKeyImageUrl = "image_url";
+    private const string BundleKeyChannelId = "channel_id";
+    private const string BundleKeyData = "data";
+
+    public static FCMNotification ToFCMNotification(this RemoteMessage message)
+    {
+        var notification = message.GetNotification();
+
+        var data = message.Data == null
+            ? new System.Collections.Generic.Dictionary<string, string>()
+            : new System.Collections.Generic.Dictionary<string, string>(message.Data);
+        // Compat met de oude plugin: click_action uit het notification-gedeelte
+        // van de payload meenemen in Data (data-key heeft voorrang).
+        var clickAction = notification?.ClickAction;
+        if(!string.IsNullOrEmpty(clickAction) && !data.ContainsKey("click_action")) {
+            data["click_action"] = clickAction;
+        }
+
+        return new FCMNotification(
+            notification?.Body,
+            notification?.Title,
+            notification?.ImageUrl?.ToString(),
+            data) {
+            ChannelId = notification?.ChannelId
+        };
+    }
+
+    public static FCMNotification ToFCMNotification(this Bundle bundle)
+    {
+        return new FCMNotification(
+            bundle.GetString(BundleKeyBody),
+            bundle.GetString(BundleKeyTitle),
+            bundle.GetString(BundleKeyImageUrl),
+            bundle.GetBundle(BundleKeyData)?.ToDictionary()) {
+            ChannelId = bundle.GetString(BundleKeyChannelId)
+        };
+    }
+
+    public static Bundle ToBundle(this FCMNotification notification)
+    {
+        var bundle = new Bundle();
+        bundle.PutString(BundleKeyBody, notification.Body);
+        bundle.PutString(BundleKeyTitle, notification.Title);
+        bundle.PutString(BundleKeyImageUrl, notification.ImageUrl);
+        bundle.PutString(BundleKeyChannelId, notification.ChannelId);
+        bundle.PutBundle(BundleKeyData, notification.Data?.ToBundle());
+        return bundle;
+    }
+
+    public static FCMNotification GetNotificationFromExtras(this Intent intent, string extraName)
+    {
+        if(intent.HasExtra(extraName)) {
+            return intent
+                .GetBundleExtra(extraName)
+                .ToFCMNotification();
+        } else if(intent.HasExtra("google.message_id")) {
+            return new FCMNotification(
+                intent.Extras.GetString(BundleKeyBody),
+                intent.Extras.GetString(BundleKeyTitle),
+                intent.Extras.GetString(BundleKeyImageUrl),
+                intent.Extras.ToDictionary());
+        } else {
+            throw new FCMException("Couldn't get notification from intent extras");
+        }
+    }
+
+    public static bool IsNotificationTappedIntent(this Intent intent, string extraName)
+    {
+        try {
+            return intent.GetNotificationFromExtras(extraName) != null;
+        } catch(Exception) {
+            return false;
+        }
+    }
+
+}

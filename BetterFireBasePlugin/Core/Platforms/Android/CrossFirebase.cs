@@ -1,0 +1,79 @@
+using Firebase;
+using System.Diagnostics.CodeAnalysis;
+
+namespace Plugin.BetterFirebasePushNotification;
+
+/// <summary>
+/// Android-specific initialization entry point for Firebase.
+/// </summary>
+public static class CrossFirebase
+{
+    /// <summary>
+    /// Gets the activity locator delegate used to obtain the current Android activity.
+    /// </summary>
+    public static Func<Activity>? ActivityLocator {
+        get;
+        private set;
+    }
+
+    /// <summary>
+    /// Initializes Firebase on Android.
+    /// </summary>
+    /// <param name="activity">The current activity. This will be passed into the platform FirebaseApp.Initialize method.</param>
+    /// <param name="activityLocator">A delegate that should always return the 'current' activity. This will be invoked whenever the plugin needs to pass an activity into native Firebase SDK methods.</param>
+    /// <param name="firebaseOptions">Optional Firebase configuration options.</param>
+    /// <param name="name">Optional name for the Firebase app instance.</param>
+    public static void Initialize(
+        Activity activity,
+        Func<Activity> activityLocator,
+        FirebaseOptions? firebaseOptions = null,
+        string? name = null)
+    {
+        RegisterActivityLocator(activityLocator);
+
+        if(firebaseOptions == null) {
+            FirebaseApp.InitializeApp(activity);
+        } else if(name == null) {
+            FirebaseApp.InitializeApp(activity, firebaseOptions);
+        } else {
+            FirebaseApp.InitializeApp(activity, firebaseOptions, name);
+        }
+
+        // Only invoke after-initialize hooks if the default Firebase app was successfully created.
+        if(TryGetDefaultApp(out _)) {
+            FirebaseInitializationHooks.InvokeAfterInitialize();
+        } else {
+            Console.WriteLine(
+                "[Plugin.BetterFirebasePushNotification] Warning: FirebaseApp.Initialize() did not create a default Firebase app instance. "
+                    + "Likely cause: google-services.json is missing, corrupt, or has a package_name that doesn't match ApplicationId. "
+                    + "Provide explicit FirebaseOptions to CrossFirebase.Initialize() to fix. "
+                    + "AppCheck and other lifecycle-dependent services will not be initialized."
+            );
+        }
+    }
+
+    /// <summary>
+    /// Safely checks whether a default FirebaseApp exists.
+    /// FirebaseApp.Instance (getInstance()) throws IllegalStateException when no default app is configured.
+    /// </summary>
+    /// <param name="app">The default Firebase app when this method returns true; otherwise null.</param>
+    public static bool TryGetDefaultApp([NotNullWhen(true)] out FirebaseApp? app)
+    {
+        try {
+            app = FirebaseApp.Instance;
+            return app != null;
+        } catch(Java.Lang.IllegalStateException) {
+            app = null!;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Registers an activity locator delegate.
+    /// </summary>
+    /// <param name="activityLocator">A delegate that returns the current Android activity.</param>
+    public static void RegisterActivityLocator(Func<Activity> activityLocator)
+    {
+        ActivityLocator = activityLocator;
+    }
+}
